@@ -1,0 +1,783 @@
+<?php
+
+/**
+ * @file
+ * The core implementation test for the link widget module.
+ */
+
+/**
+ * Implements hook_link_widget_attributes_info().
+ */
+function link_widget_link_widget_attributes_info() {
+  $attributes['class'] = array(
+    'label' => t('Class'),
+    'description' => t('Specifies one or more class names for an element.'),
+    'type' => 'textfield',
+    'multiple_values' => TRUE,
+  );
+  $attributes['rel'] = array(
+    'label' => t('Rel'),
+    'description' => t('Specifies the relationship between the current document
+      and the linked document.'),
+    'type' => 'textfield',
+    'multiple_values' => FALSE,
+  );
+  $attributes['target'] = array(
+    'label' => t('Target'),
+    'description' => ('Specifies where to open the linked document.'),
+    'type' => 'select',
+    'options' => array(
+      '_self'   => t('Same Window (_self)'),
+      '_blank'  => t('New Window (_blank)'),
+      '_parent' => t('Parent Frame (_parent)'),
+      '_top'    => t('Top Frame (_top)'),
+    ),
+    'multiple_values' => FALSE,
+  );
+  $attributes['media'] = array(
+    'label' => t('Media'),
+    'description' => t('Specifies what media/device the linked document is
+      optimized for.'),
+    'type' => 'textfield',
+    'multiple_values' => FALSE,
+  );
+  $attributes['type'] = array(
+    'label' => t('Type'),
+    'description' => t('Specifies the MIME type of the linked document.'),
+    'type' => 'textfield',
+    'multiple_values' => FALSE,
+  );
+
+  // Allow other modules to alter the attributes.
+  drupal_alter('link_widget_attributes_info', $attributes);
+
+  return $attributes;
+}
+
+/**
+ * Implements hook_field_widget_info().
+ */
+function link_widget_field_widget_info() {
+  return array(
+    'link_image_widget' => array(
+      'label' => t('Link'),
+      'description' => t('A widget to capture link attributes for the image field.'),
+      'field types' => array('image'),
+      'settings' => array(
+        'link_widget' => array(
+          'enabled' => array(),
+          'link_url' => NULL,
+          'link_attributes' => array(),
+        ),
+        'progress_indicator' => 'throbber',
+        'preview_image_style' => 'thumbnail',
+      ),
+      'behaviors' => array(
+        'multiple values' => FIELD_BEHAVIOR_CUSTOM,
+        'default value' => FIELD_BEHAVIOR_NONE,
+      ),
+    ),
+    'link_text_widget' => array(
+      'label' => t('Link'),
+      'description' => t('A widget to capture link attributes for the text field.'),
+      'field types' => array('text'),
+      'settings' => array(
+        'link_widget' => array(
+          'enabled' => array(),
+          'link_url' => NULL,
+          'link_attributes' => array(),
+        ),
+        'size' => 60,
+      ),
+      'behaviors' => array(
+        'multiple values' => FIELD_BEHAVIOR_DEFAULT,
+        'default value' => FIELD_BEHAVIOR_NONE,
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_theme().
+ */
+function link_widget_theme($existing, $type, $theme, $path) {
+  return array(
+    'link_widget_textfield' => array(
+      'render element' => 'element',
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_widget_settings_form().
+ */
+function link_widget_field_widget_settings_form($field, $instance) {
+  $widget   = $instance['widget'];
+  $settings = $widget['settings'];
+
+  $form['link_widget'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Link Settings'),
+    '#collapsible' => FALSE,
+    '#collapsed' => FALSE,
+  );
+  $link_settings = $settings['link_widget'];
+
+  $form['link_widget']['link_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Default URL'),
+    '#default_value' => isset($link_settings['link_url']) ? $link_settings['link_url'] : NULL,
+    '#weight' => 100,
+  );
+
+  $form['link_widget']['link_attributes'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Link Attributes'),
+    '#collapsible' => FALSE,
+    '#collapsed' => FALSE,
+    '#weight' => 105,
+  );
+  $link_attributes = $link_settings['link_attributes'];
+
+  // Build the link widget attribute configurations.
+  foreach (link_widget_get_attributes_info() as $attribute => $info) {
+    if (!isset($info['type']) || !isset($info['label'])) {
+      continue;
+    }
+    $form['link_widget']['link_attributes']['enabled'][$attribute] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Enable @attribute', array('@attribute' => $attribute)),
+      '#description' => $info['description'],
+      '#default_value' => isset($link_attributes['enabled'][$attribute]) ? $link_attributes['enabled'][$attribute] : NULL,
+    );
+    $form['link_widget']['link_attributes']['attributes'][$attribute] = array(
+      '#type' => 'fieldset',
+      '#title' => $info['label'],
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+      '#states' => array(
+        'visible' => array(
+          ':input[name="instance[widget][settings][link_widget][link_attributes][enabled][' . $attribute . ']"]' => array('checked' => TRUE),
+        ),
+      ),
+    );
+    $form['link_widget']['link_attributes']['attributes'][$attribute]['exposed'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Expose'),
+      '#description' => t('Display the @attribute attribute on the entity edit form.',
+        array('@attribute' => $attribute)),
+      '#default_value' => isset($link_attributes['attributes'][$attribute]['exposed']) ? $link_attributes['attributes'][$attribute]['exposed'] : NULL,
+    );
+    $form['link_widget']['link_attributes']['attributes'][$attribute]['default_value'] = array(
+      '#type' => $info['type'],
+      '#title' => t('@label Default Value', array('@label' => $info['label'])),
+      '#description' => t('The default value used for the @attribute attribute.',
+        array('@attribute' => $attribute)),
+      '#default_value' => isset($link_attributes['attributes'][$attribute]['default_value']) ? $link_attributes['attributes'][$attribute]['default_value'] : NULL,
+    );
+
+    // Overwrite the link attributes description for multiple valued fields.
+    if (isset($info['multiple_values']) && $info['multiple_values']) {
+      $form['link_widget']['link_attributes']['attributes'][$attribute]['default_value']['#description'] = t(
+        'The default value used for the @attribute attribute.<br/> <strong>NOTE:</strong> Separate
+        each  @attribute value with a space.', array('@attribute' => $attribute));
+    }
+    $default_value_properties = array();
+
+    // If attribute type is a select then we need to attach the options.
+    if ($info['type'] == 'select' && isset($info['options'])) {
+      $default_value_properties += array(
+        '#options' => $info['options'],
+        '#empty_option' => t('-None-'),
+      );
+    }
+
+    $form['link_widget']['link_attributes']['attributes'][$attribute]['default_value'] += $default_value_properties;
+  }
+
+  // Support for the token module.
+  if (module_exists('token')) {
+    $form['link_widget']['token_patterns'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Replacement Patterns'),
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+      '#weight' => 110,
+    );
+    $form['link_widget']['token_patterns']['token'] = array(
+      '#theme' => 'token_tree',
+      '#token_types' => array($instance['entity_type']),
+    );
+  }
+
+  return $form;
+}
+
+/**
+ * Implements hook_field_widget_form().
+ */
+function link_widget_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  $widget = $instance['widget'];
+
+  $elements = array();
+  switch ($widget['type']) {
+    case 'link_image_widget':
+      $elements = image_field_widget_form($form, $form_state, $field, $instance, $langcode, $items, $delta, $element);
+
+      // Attach the link widget process callback to the image element.
+      foreach (element_children($elements) as $delta) {
+
+        // Doesn't look like the image field keeps track of the element delta
+        // so we'll update it here to make sure its consistent.
+        $elements[$delta]['#delta'] = $delta;
+
+        // Only collect the link attributes if an image has been uploaded.
+        $values = file_field_widget_value($elements[$delta], FALSE, $form_state);
+        if (!$values['display']) {
+          continue;
+        }
+
+        // Attach the link widget process callback to the element.
+        $elements[$delta]['#process'][] = 'link_widget_process_element';
+        $elements[$delta]['#element_validate'][] = 'link_widget_validate_element';
+
+        // Send the link widget values along so when we process the element we
+        // have a consistent way to retrieve the element values.
+        $elements[$delta]['#link_widget']['values'] = $values;
+      }
+      break;
+
+    case 'link_text_widget':
+      // We can't use the text_field_widget_form function since it needs to have
+      // the instance widget type equal to text_textfield widget type.
+      $elements = array(
+        '#theme_wrappers' => array('fieldset'),
+      ) + $element;
+
+      $elements['value'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Link Text'),
+        // Since theme_textfield doesn't render children elements. We will have
+        // to use our own theme function to build the textfield.
+        '#theme' => 'link_widget_textfield',
+        '#size' => $instance['widget']['settings']['size'],
+        '#maxlength' => $field['settings']['max_length'],
+        '#attributes' => array('class' => array('text-full')),
+        '#default_value' => isset($items[$delta]['value']) ? $items[$delta]['value'] : NULL,
+      );
+
+      // Attach the link widget process callback to the element.
+      $elements['#process'][] = 'link_widget_process_element';
+      $elements['#element_validate'][] = 'link_widget_validate_element';
+
+      // Send the link widget values along so when we process the element we
+      // have a consistent way to retrieve the element values.
+      $elements['#link_widget']['values'] = link_widget_get_values_by_element($element);
+      break;
+  }
+
+  return $elements;
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function link_widget_field_formatter_info() {
+  return array(
+    'link_image_formatter' => array(
+      'label' => t('Link'),
+      'settings' => array(
+        'image_style' => NULL,
+      ),
+      'field types' => array('image'),
+    ),
+    'link_text_formatter' => array(
+      'label' => t('Link'),
+      'field types' => array('text'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function link_widget_form_field_ui_display_overview_form_alter(&$form, &$form_state) {
+  $form['#validate'][] = 'link_widget_ui_display_validate';
+}
+
+/**
+ * Implements hook_field_formatter_settings_form().
+ */
+function link_widget_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
+  $display  = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+
+  switch ($display['type']) {
+
+    // Settings for the link image widget formatter.
+    case 'link_image_formatter':
+      $form['image_style'] = array(
+        '#title' => t('Image style'),
+        '#type' => 'select',
+        '#default_value' => $settings['image_style'],
+        '#empty_option' => t('None (original image)'),
+        '#options' => image_style_options(FALSE),
+      );
+      break;
+  }
+
+  return $form;
+}
+
+/**
+ * Implements hook_field_formatter_settings_summary().
+ */
+function link_widget_field_formatter_settings_summary($field, $instance, $view_mode) {
+  $summary  = array();
+  $display  = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+
+  switch ($display['type']) {
+
+    // Summary for the link image widget.
+    case 'link_image_formatter':
+      $image_styles = image_style_options(FALSE);
+      // Unset possible 'No defined styles' option.
+      unset($image_styles['']);
+      // Styles could be lost because of enabled/disabled modules that defines
+      // their styles in code.
+      if (isset($image_styles[$settings['image_style']])) {
+        $summary[] = t('Image style: @style', array('@style' => $image_styles[$settings['image_style']]));
+      }
+      else {
+        $summary[] = t('Original image');
+      }
+      break;
+  }
+
+  return implode('<br />', $summary);
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function link_widget_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element  = array();
+  $settings = $display['settings'];
+
+  $allow_html = FALSE;
+
+  // Iterate through the items and build the link element based on display type.
+  foreach ($items as $delta => $item) {
+    switch ($display['type']) {
+      case 'link_image_formatter':
+        $allow_html = TRUE;
+        $link_text = theme('image_formatter',
+          array('item' => $item, 'image_style' => $settings['image_style']));
+        break;
+
+      case 'link_text_formatter':
+        $link_text = _text_sanitize($instance, $langcode, $item, 'value');
+        break;
+    }
+    if (isset($item['link_url']) && !empty($item['link_url'])) {
+
+      // Parse the link url so we can separate the path and options.
+      $link_url     = drupal_parse_url($item['link_url']);
+      $link_options = array_diff_key($link_url, array('path' => NULL));
+
+      // Define the item link attributes.
+      $link_attributes = is_array($item['link_attributes']) ? array_filter($item['link_attributes']) : array();
+
+      // Build the link element for all widgets.
+      $element[$delta] = array(
+        '#theme' => 'link',
+        '#text' => $link_text,
+        // Path is checked by theme_link() no need to do it here.
+        '#path' => $link_url['path'],
+        '#options' => array(
+          'html' => $allow_html,
+          'attributes' => $link_attributes,
+        ) + $link_options,
+      );
+    }
+    else {
+      $element[$delta] = array(
+        '#theme' => 'html_tag',
+        '#tag' => 'span',
+        '#attributes' => array(
+          'class' => array('link-widget link-widget-url-empty'),
+        ),
+        '#value' => !$allow_html ? check_plain($link_text) : $link_text,
+      );
+    }
+  }
+
+  return $element;
+}
+
+/**
+ * Retrieve the link widget attributes info.
+ *
+ * @return array
+ *   An array of all the link widget attributes.
+ */
+function link_widget_get_attributes_info() {
+  return module_invoke_all('link_widget_attributes_info');
+}
+
+/**
+ * A theme preprocess for the flexslider container.
+ *
+ * @param $vars
+ *   An array of the element variables.
+ */
+function link_widget_preprocess_flexslider_container(&$vars) {
+  $items = &$vars['items'];
+
+  foreach ($items as $delta => &$item) {
+    if (!isset($item['#item']['link_url']) || empty($item['#item']['link_url'])) {
+      continue;
+    }
+
+    // Parse the link url so we can separate the path and options.
+    $link_url     = drupal_parse_url($item['#item']['link_url']);
+    $link_options = array_diff_key($link_url, array('path' => NULL));
+
+    // Define the link url path options.
+    $options = array(
+      'attributes' => is_array($item['#item']['link_attributes']) ? array_filter($item['#item']['link_attributes']) : array(),
+    ) + $link_options;
+
+    // Attach the link url to the flexslider images.
+    $item['#path'] = array(
+      'path' => $link_url['path'],
+      'options' => $options,
+    );
+  }
+}
+
+/**
+ * A link widget textfield theme function.
+ *
+ * @param $variables
+ *   An array containing the variable element.
+ *
+ * @return string
+ *   Returns HTML for a textfield form element.
+ */
+function theme_link_widget_textfield($variables) {
+  $element = $variables['element'];
+
+  $output  = theme('textfield', $variables);
+  $output .= drupal_render_children($element);
+
+  return $output;
+}
+
+/**
+ * Link widget validation callback for the field UI display form.
+ */
+function link_widget_ui_display_validate($form, $form_state) {
+  $values = $form_state['values'];
+
+  foreach ($values['fields'] as $field_name => $info) {
+    if ($info['type'] != 'link_text_formatter' &&
+      $info['type'] != 'link_image_formatter') {
+      continue;
+    }
+    $instance = field_info_instance($form['#entity_type'], $field_name, $form['#bundle']);
+
+    if ($instance['widget']['type'] != 'link_text_widget' &&
+     $instance['widget']['type'] != 'link_image_widget') {
+
+      // Set an error if the field instance doesn't have the appropriate
+      // field widget selected for this display.
+      form_error($form['fields'][$field_name], t("The link formatter will not
+        be able to output the element properly. This formatter only works with
+        fields that have a widget type of 'link'."));
+    }
+  }
+}
+
+/**
+ * Process the attributes tokens for an element.
+ *
+ * @param $element
+ *   A form element array containing basic properties for the widget.
+ * @param $attributes
+ *   A array containing link widget attributes settings.
+ *
+ * @return array
+ *   An array of the processed attributes tokens.
+ */
+function link_widget_process_attribute_tokens($element, $attributes) {
+  if (!isset($attributes) || !is_array($attributes)) {
+    return;
+  }
+  $attributes_info  = link_widget_get_attributes_info();
+  $attribute_tokens = array();
+
+  foreach ($attributes as $attribute => $info) {
+    if (empty($info['default_value'])) {
+      continue;
+    }
+    $default_value = $info['default_value'];
+
+    // If the attribute allows multiple values then process them differently.
+    if (isset($attributes_info[$attribute]['multiple_values']) && $attributes_info[$attribute]['multiple_values']) {
+      foreach (explode(' ', $default_value) as $value) {
+        $attribute_tokens[$attribute][] = token_replace($value, array($element['#entity_type'] => $element['#entity']));
+      }
+    }
+    else {
+      $attribute_tokens[$attribute] = token_replace($default_value, array($element['#entity_type'] => $element['#entity']));
+    }
+  }
+
+  return $attribute_tokens;
+}
+
+/**
+ * The link widget element validation callback.
+ *
+ * @param $element
+ *   A form element array containing basic properties for the widget.
+ * @param $form_state
+ *   An associative array containing the current state of the form.
+ * @param $form
+ *   Nested array of form elements that comprise the form.
+ */
+function link_widget_validate_element($element, &$form_state, $form) {
+  $instance = link_widget_get_instance_by_element($element);
+
+  if (!isset($instance)) {
+    return;
+  }
+  $widget = $instance['widget'];
+
+  // Retrieve the element values from the form state.
+  $values = drupal_array_get_nested_value($form_state['values'], $element['#array_parents']);
+
+  switch ($widget['type']) {
+    case 'link_image_widget':
+      $field_is_empty = image_field_is_empty($values, NULL);
+      break;
+
+    case 'link_text_widget':
+      $field_is_empty = text_field_is_empty($values, NULL);
+      break;
+  }
+
+  // Bail out if the field is empty.
+  if ($field_is_empty) {
+    return;
+  }
+  $settings      = $widget['settings'];
+  $link_settings = $settings['link_widget'];
+
+  $attributes_info    = link_widget_get_attributes_info();
+  $attributes_default = link_widget_process_attribute_tokens($element, $link_settings['link_attributes']['attributes']);
+
+  $array_parents = $element['#array_parents'];
+  foreach ($values['link_attributes'] as $attribute => $value) {
+
+    $parents = array_merge($array_parents, array('link_attributes', $attribute));
+
+    // If the attributes have multiple values then we'll need to separate them.
+    if (isset($attributes_info[$attribute]['multiple_values']) &&
+      $attributes_info[$attribute]['multiple_values']) {
+
+      if (is_string($value)) {
+        $value = array_filter(explode(' ', $value));
+      }
+    }
+
+    // Get the default value; which were setup by the site administrator.
+    $default_value = isset($attributes_default[$attribute]) ? $attributes_default[$attribute] : NULL;
+
+    // Alter the value if the attribute has been exposed.
+    if (isset($link_settings['link_attributes']['attributes'][$attribute]['exposed']) &&
+      $link_settings['link_attributes']['attributes'][$attribute]['exposed']) {
+
+      if (!empty($default_value)) {
+
+        if (is_array($value)) {
+          // Merge the user value and default value together.
+          $value = array_merge($value, $default_value);
+        }
+        elseif (empty($value)) {
+          // Set the default value as the value.
+          $value = $default_value;
+        }
+      }
+    }
+    elseif (!empty($default_value)) {
+      $value = $default_value;
+    }
+
+    // Alter the attribute value if we are working with a "class".
+    if ($attribute == 'class') {
+      $value = is_array($value) ? array_map('drupal_html_class', $value) : drupal_html_class($value);
+    }
+
+    // Set the attribute value in the form state.
+    drupal_array_set_nested_value($form_state['values'], $parents, $value);
+  }
+}
+
+/**
+ * Retrieve the element field values.
+ *
+ * @param $element
+ *   A form element array containing basic properties for the widget.
+ *
+ * @return array
+ *   An array of the element field values keyed by their delta.
+ */
+function link_widget_get_values_by_element($element) {
+  if (!isset($element['#entity_type']) || !isset($element['#entity']) || !isset($element['#field_name'])) {
+    return;
+  }
+  $values = field_get_items($element['#entity_type'], $element['#entity'], $element['#field_name'], $element['#language']);
+
+  return isset($values[$element['#delta']]) ? $values[$element['#delta']] : array();
+}
+
+/**
+ * Retrieve the element field instance.
+ *
+ * @param $element
+ *   A form element array containing basic properties for the widget.
+ *
+ * @return array
+ *   An associative array of instance data.
+ */
+function link_widget_get_instance_by_element($element) {
+  if (!isset($element['#entity_type']) || !isset($element['#field_name']) || !isset($element['#bundle'])) {
+    return;
+  }
+
+  return field_info_instance($element['#entity_type'], $element['#field_name'], $element['#bundle']);
+}
+
+/**
+ * The link widget element process callback.
+ *
+ * @param $element
+ *   A form element array containing basic properties for the widget.
+ * @param $form_state
+ *   An associative array containing the current state of the form.
+ * @param $form
+ *   Nested array of form elements that comprise the form.
+ *
+ * @return array
+ *   A form element array containing the link widget additional properties.
+ */
+function link_widget_process_element($element, &$form_state, $form) {
+  $instance = link_widget_get_instance_by_element($element);
+  if (empty($instance)) {
+    return $element;
+  }
+  $widget   = $instance['widget'];
+  $settings = $widget['settings'];
+
+  $link_settings = $settings['link_widget'];
+  $link_attribute_settings = $link_settings['link_attributes'];
+
+  $values = $element['#link_widget']['values'];
+
+  // Attach the link url field to the element.
+  $element['link_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Link URL'),
+    '#description' => t('The URL that you would like the link to reference.'),
+    '#default_value' => (isset($values['link_url']) && !empty($values['link_url'])) ? $values['link_url'] : $link_settings['link_url'],
+    '#weight' => 100,
+  );
+
+  // Attach the link attributes to the element.
+  $element['link_attributes'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Link Attributes'),
+    '#collapsed' => TRUE,
+    '#collapsible' => TRUE,
+    '#weight' => 110,
+  );
+  $attribute_types    = array();
+  $attributes_default = link_widget_process_attribute_tokens($element, $link_attribute_settings['attributes']);
+
+  // Attach all the enabled attributes to the given element.
+  foreach (link_widget_get_attributes_info() as $attribute => $info) {
+    if (!$link_attribute_settings['enabled'][$attribute]) {
+      continue;
+    }
+    $value = (isset($values['link_attributes'][$attribute]) && !empty($values['link_attributes'][$attribute])) ?
+      $values['link_attributes'][$attribute] : NULL;
+
+    if (isset($link_attribute_settings['attributes'][$attribute]['exposed']) &&
+      $link_attribute_settings['attributes'][$attribute]['exposed']) {
+
+      // Get the default value; which were setup by the site administrator.
+      $default_value = isset($attributes_default[$attribute]) ? $attributes_default[$attribute] : NULL;
+
+      // If the attribute is a "class", we'll need to run it through
+      // drupal_html_class() function to insure its properly formated.
+      if ($attribute == 'class') {
+        $default_value = is_array($default_value) ? array_map('drupal_html_class', $default_value) : drupal_html_class($default_value);
+      }
+
+      // Alter the value based on a set of conditions if the default value is
+      // not empty.
+      if (!empty($default_value)) {
+        // Remove default values from the user values.
+        if (is_array($value)) {
+          $value = implode(' ', array_diff($value, $default_value));
+        }
+        elseif ($value == $default_value) {
+          $value = NULL;
+        }
+        elseif (empty($value) && $info['type'] == 'select') {
+          $value = $default_value;
+        }
+      }
+    }
+    else {
+      // Alter the attribute type based if attribute is not exposed.
+      $info['type'] = 'hidden';
+    }
+    $attribute_types[] = $info['type'];
+
+    $element['link_attributes'][$attribute] = array(
+      '#type' => $info['type'],
+      '#title' => $info['label'],
+      '#description' => isset($info['description']) ? $info['description'] : NULL,
+      '#default_value' => $value,
+    );
+
+    // Attach the options array if the attribute type equaled to "select".
+    if ($info['type'] == 'select' && isset($info['options'])) {
+      $element['link_attributes'][$attribute] += array(
+        '#options' => $info['options'],
+        '#empty_option' => t('-None-'),
+      );
+    }
+
+    // Alter the description if the attribute has multiple values.
+    if (isset($info['multiple_values']) && $info['multiple_values']) {
+      $element['link_attributes'][$attribute]['#description'] = $info['description'] .
+      t('<br /><strong>NOTE:</strong> Separate each @attribute value with a space.', array('@attribute' => $attribute));
+    }
+  }
+  $attribute_types = array_unique($attribute_types);
+
+  // If the attributes are not enabled or exposed there is no reason to display
+  // the fieldset on the entity edit form.
+  if ((in_array('hidden', $attribute_types) && count($attribute_types) == 1) ||
+    empty($attribute_types)) {
+
+    $element['link_attributes']['#access'] = FALSE;
+  }
+
+  return $element;
+}

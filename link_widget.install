@@ -1,0 +1,32 @@
+<?php
+
+/**
+ * @file
+ * The installation implementations for the link widget module.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function link_widget_schema() {
+  $schema['link_widget'] = array(
+    'description' => 'Stores the link widget attribute records.',
+    'fields' => array(
+      'link_url' => array(
+        'description' => 'The link URL.',
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => FALSE,
+      ),
+      'link_attributes' => array(
+        'description' => 'The link attributes.',
+        'type' => 'blob',
+        'size' => 'big',
+        'not null' => FALSE,
+        'serialized' => TRUE,
+      ),
+    ),
+  );
+
+  return field_widget_sql_storage_build_widget_schema($schema);;
+}
