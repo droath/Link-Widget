@@ -197,16 +197,17 @@ function link_widget_field_widget_settings_form($field, $instance) {
 
   // Support for the token module.
   if (module_exists('token')) {
-    $form['link_widget']['token_patterns'] = array(
+    $form['link_widget']['replacement_patterns'] = array(
       '#type' => 'fieldset',
       '#title' => t('Replacement Patterns'),
       '#collapsible' => TRUE,
       '#collapsed' => TRUE,
       '#weight' => 110,
     );
-    $form['link_widget']['token_patterns']['token'] = array(
+    $form['link_widget']['replacement_patterns']['token'] = array(
       '#theme' => 'token_tree',
       '#token_types' => array($instance['entity_type']),
+      '#dialog' => TRUE,
     );
   }
 
@@ -226,14 +227,10 @@ function link_widget_field_widget_form(&$form, &$form_state, $field, $instance, 
 
       // Attach the link widget process callback to the image element.
       foreach (element_children($elements) as $delta) {
+        $values = $elements[$delta]['#default_value'];
 
-        // Doesn't look like the image field keeps track of the element delta
-        // so we'll update it here to make sure its consistent.
-        $elements[$delta]['#delta'] = $delta;
-
-        // Only collect the link attributes if an image has been uploaded.
-        $values = file_field_widget_value($elements[$delta], FALSE, $form_state);
-        if (!$values['display']) {
+        // Only collect the link attributes if an image (fid) has been uploaded.
+        if (empty($values['fid'])) {
           continue;
         }
 
@@ -264,6 +261,7 @@ function link_widget_field_widget_form(&$form, &$form_state, $field, $instance, 
         '#maxlength' => $field['settings']['max_length'],
         '#attributes' => array('class' => array('text-full')),
         '#default_value' => isset($items[$delta]['value']) ? $items[$delta]['value'] : NULL,
+        '#required' => isset($elements['#required']) ? $elements['#required'] : FALSE,
       );
 
       // Attach the link widget process callback to the element.
@@ -312,11 +310,13 @@ function link_widget_field_formatter_settings_form($field, $instance, $view_mode
   $display  = $instance['display'][$view_mode];
   $settings = $display['settings'];
 
+  $element = array();
+
   switch ($display['type']) {
 
     // Settings for the link image widget formatter.
     case 'link_image_formatter':
-      $form['image_style'] = array(
+      $element['image_style'] = array(
         '#title' => t('Image style'),
         '#type' => 'select',
         '#default_value' => $settings['image_style'],
@@ -326,7 +326,7 @@ function link_widget_field_formatter_settings_form($field, $instance, $view_mode
       break;
   }
 
-  return $form;
+  return $element;
 }
 
 /**
@@ -482,8 +482,8 @@ function link_widget_ui_display_validate($form, $form_state) {
   $values = $form_state['values'];
 
   foreach ($values['fields'] as $field_name => $info) {
-    if ($info['type'] != 'link_text_formatter' &&
-      $info['type'] != 'link_image_formatter') {
+    if (!isset($info['type']) || ($info['type'] != 'link_text_formatter' &&
+      $info['type'] != 'link_image_formatter')) {
       continue;
     }
     $instance = field_info_instance($form['#entity_type'], $field_name, $form['#bundle']);
@@ -682,8 +682,9 @@ function link_widget_process_element($element, &$form_state, $form) {
   $widget   = $instance['widget'];
   $settings = $widget['settings'];
 
-  $link_settings = $settings['link_widget'];
-  $link_attribute_settings = $link_settings['link_attributes'];
+  $link_settings            = $settings['link_widget'];
+  $link_attribute_settings  = $link_settings['link_attributes'];
+  $link_settings_attributes = isset($link_attribute_settings['attributes']) ? $link_attribute_settings['attributes'] : array();
 
   $values = $element['#link_widget']['values'];
 
@@ -694,6 +695,7 @@ function link_widget_process_element($element, &$form_state, $form) {
     '#description' => t('The URL that you would like the link to reference.'),
     '#default_value' => (isset($values['link_url']) && !empty($values['link_url'])) ? $values['link_url'] : $link_settings['link_url'],
     '#weight' => 100,
+    '#required' => isset($element['#required']) ? $element['#required'] : FALSE,
   );
 
   // Attach the link attributes to the element.
@@ -704,19 +706,19 @@ function link_widget_process_element($element, &$form_state, $form) {
     '#collapsible' => TRUE,
     '#weight' => 110,
   );
-  $attribute_types    = array();
-  $attributes_default = link_widget_process_attribute_tokens($element, $link_attribute_settings['attributes']);
+  $attribute_types = array();
+  $attributes_default = link_widget_process_attribute_tokens($element, $link_settings_attributes);
 
   // Attach all the enabled attributes to the given element.
   foreach (link_widget_get_attributes_info() as $attribute => $info) {
-    if (!$link_attribute_settings['enabled'][$attribute]) {
+    if (isset($link_attribute_settings['enabled']) && !$link_attribute_settings['enabled'][$attribute]) {
       continue;
     }
     $value = (isset($values['link_attributes'][$attribute]) && !empty($values['link_attributes'][$attribute])) ?
       $values['link_attributes'][$attribute] : NULL;
 
-    if (isset($link_attribute_settings['attributes'][$attribute]['exposed']) &&
-      $link_attribute_settings['attributes'][$attribute]['exposed']) {
+    if (isset($link_settings_attributes[$attribute]['exposed']) &&
+      $link_settings_attributes[$attribute]['exposed']) {
 
       // Get the default value; which were setup by the site administrator.
       $default_value = isset($attributes_default[$attribute]) ? $attributes_default[$attribute] : NULL;
@@ -730,6 +732,7 @@ function link_widget_process_element($element, &$form_state, $form) {
       // Alter the value based on a set of conditions if the default value is
       // not empty.
       if (!empty($default_value)) {
+
         // Remove default values from the user values.
         if (is_array($value)) {
           $value = implode(' ', array_diff($value, $default_value));
@@ -737,7 +740,8 @@ function link_widget_process_element($element, &$form_state, $form) {
         elseif ($value == $default_value) {
           $value = NULL;
         }
-        elseif (empty($value) && $info['type'] == 'select') {
+
+        if (empty($value) && $info['type'] == 'select') {
           $value = $default_value;
         }
       }

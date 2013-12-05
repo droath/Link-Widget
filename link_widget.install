@@ -30,3 +30,25 @@ function link_widget_schema() {
 
   return field_widget_sql_storage_build_widget_schema($schema);;
 }
+
+/**
+ * Update the revision_id field to be able to allowed NULL values.
+ */
+function link_widget_update_7000() {
+  $table = 'link_widget';
+
+  // Remove the database tables primary keys.
+  db_drop_primary_key($table);
+
+  // Add the revised primary keys back to the database table.
+  db_add_primary_key($table, array('entity_type', 'bundle', 'entity_id', 'delta', 'field_name'));
+
+  // Change the revision_id field to be able to have NULL values.
+  db_change_field($table, 'revision_id', 'revision_id', array(
+      'description' => 'The entity revision ID.',
+      'type' => 'int',
+      'unsigned' => TRUE,
+      'not null' => FALSE,
+    )
+  );
+}
