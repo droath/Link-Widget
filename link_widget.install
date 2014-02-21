@@ -30,3 +30,33 @@ function link_widget_schema() {
 
   return field_widget_sql_storage_build_widget_schema($schema);;
 }
+
+/**
+ * Update link widget field instances settings.
+ */
+function link_widget_update_7000() {
+
+  // Iterate over all field instances so we can update any instances that deal
+  // with the link_widget module.
+  foreach (field_info_instances() as $entity_type => $bundles) {
+    $info = entity_get_info($entity_type);
+    if (!$info['fieldable']) {
+      continue;
+    }
+    foreach ($bundles as $bundle_name => $fields) {
+      foreach ($fields as $field_name => $instance) {
+        // Ensure we only update the instances associated with the link_widget
+        // module.
+        if ($instance['widget']['module'] != 'link_widget') {
+          continue;
+        }
+        $updated_settings = field_info_widget_settings($instance['widget']['type']);
+
+        // Merge the updated settings with the instance current settings.
+        $instance['widget']['settings'] = drupal_array_merge_deep($updated_settings, $instance['widget']['settings']);
+
+        field_update_instance($instance);
+      }
+    }
+  }
+}

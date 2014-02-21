@@ -65,8 +65,12 @@ function link_widget_field_widget_info() {
       'field types' => array('image'),
       'settings' => array(
         'link_widget' => array(
-          'enabled' => array(),
           'link_url' => NULL,
+          'link_url_options' => array(
+            'url_fallback' => 'display_field_without_link',
+            'label' => NULL,
+            'description' => t('Input a URL that you would like the link to reference.'),
+          ),
           'link_attributes' => array(),
         ),
         'progress_indicator' => 'throbber',
@@ -83,8 +87,14 @@ function link_widget_field_widget_info() {
       'field types' => array('text'),
       'settings' => array(
         'link_widget' => array(
-          'enabled' => array(),
+          'default_text' => NULL,
+          'default_text_options' => array(),
           'link_url' => NULL,
+          'link_url_options' => array(
+            'url_fallback' => 'disregard_field_value',
+            'label' => NULL,
+            'description' => t('Input a URL that you would like the link to reference.'),
+          ),
           'link_attributes' => array(),
         ),
         'size' => 60,
@@ -121,15 +131,80 @@ function link_widget_field_widget_settings_form($field, $instance) {
     '#collapsible' => FALSE,
     '#collapsed' => FALSE,
   );
-  $link_settings = $settings['link_widget'];
+  $link_settings = isset($settings['link_widget']) ? $settings['link_widget'] : array();
 
+  // Define the setting for the widget link_text_widget only.
+  if ($widget['type'] == 'link_text_widget') {
+
+    // Define the link default text input.
+    $form['link_widget']['default_text'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Default Text'),
+      '#default_value' => isset($link_settings['default_text']) ? $link_settings['default_text'] : NULL,
+    );
+
+    $form['link_widget']['default_text_options'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Default Text Options'),
+      '#states' => array(
+        'visible' => array(
+          ':input[name="instance[widget][settings][link_widget][default_text]"]' => array('!value' => ''),
+        ),
+      ),
+    );
+    $default_text_options = isset($link_settings['default_text_options']) ? $link_settings['default_text_options'] : array();
+
+    $form['link_widget']['default_text_options']['hide_text'] = array(
+      '#type' => 'radios',
+      '#title' => t('Hide Text Input'),
+      '#description' => t('Hide the link text input element from the entity edit form.'),
+      '#options' => array(0 => t('No'), 1 => t('Yes')),
+      '#default_value' => isset($default_text_options['hide_text']) ? $default_text_options['hide_text'] : 0,
+    );
+  }
+
+  // Define the default link URL input.
   $form['link_widget']['link_url'] = array(
     '#type' => 'textfield',
     '#title' => t('Default URL'),
     '#default_value' => isset($link_settings['link_url']) ? $link_settings['link_url'] : NULL,
-    '#weight' => 100,
   );
 
+  // Define the link URL options form elements.
+  $form['link_widget']['link_url_options'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Link URL Options'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+  );
+  $link_url_options = isset($link_settings['link_url_options']) ? $link_settings['link_url_options'] : array();
+
+  $form['link_widget']['link_url_options']['url_fallback'] = array(
+    '#type' => 'select',
+    '#title' => t('URL Fallback'),
+    '#description' => t('If the URL is not provided, what should happen?'),
+    '#options' => array(
+      'disregard_field_value' => t('Disregard field value'),
+      'display_field_without_link' => t('Display field without link'),
+    ),
+    '#default_value' => isset($link_url_options['url_fallback']) ? $link_url_options['url_fallback'] : NULL,
+  );
+  $form['link_widget']['link_url_options']['label'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Label'),
+    '#description' => t('Overwrite the label for the URL input on the entity
+      edit form.'),
+    '#default_value' => isset($link_url_options['label']) ? $link_url_options['label'] : NULL,
+  );
+  $form['link_widget']['link_url_options']['description'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Description'),
+    '#default_value' => isset($link_url_options['description']) ? $link_url_options['description'] : NULL,
+    '#description' => t('Display a description under the URL input on the
+      entity edit form.'),
+  );
+
+  // Define the link URL attributes form elements.
   $form['link_widget']['link_attributes'] = array(
     '#type' => 'fieldset',
     '#title' => t('Link Attributes'),
@@ -556,73 +631,86 @@ function link_widget_validate_element($element, &$form_state, $form) {
   }
   $widget = $instance['widget'];
 
+  $settings         = $widget['settings'];
+  $link_settings    = $settings['link_widget'];
+  $link_url_options = $link_settings['link_url_options'];
+
   // Retrieve the element values from the form state.
   $values = drupal_array_get_nested_value($form_state['values'], $element['#array_parents']);
 
-  switch ($widget['type']) {
-    case 'link_image_widget':
-      $field_is_empty = image_field_is_empty($values, NULL);
-      break;
+  // Determine if the link URL is not empty or if the URL fallback has been set
+  // to "display_field_without_link".
+  if (!empty($values['link_url']) || (isset($link_url_options['url_fallback']) &&
+    $link_url_options['url_fallback'] == 'display_field_without_link')) {
 
-    case 'link_text_widget':
-      $field_is_empty = text_field_is_empty($values, NULL);
-      break;
+    switch ($widget['type']) {
+      case 'link_image_widget':
+        $field_is_empty = image_field_is_empty($values, NULL);
+        break;
+
+      case 'link_text_widget':
+        $field_is_empty = text_field_is_empty($values, NULL);
+        break;
+    }
+  }
+  else {
+    $field_is_empty = TRUE;
+    form_set_value($element, NULL, $form_state);
   }
 
   // Bail out if the field is empty.
   if ($field_is_empty) {
     return;
   }
-  $settings      = $widget['settings'];
-  $link_settings = $settings['link_widget'];
-
   $attributes_info    = link_widget_get_attributes_info();
   $attributes_default = link_widget_process_attribute_tokens($element, $link_settings['link_attributes']['attributes']);
 
-  $array_parents = $element['#array_parents'];
-  foreach ($values['link_attributes'] as $attribute => $value) {
+  // The link attributes are not always available; so we need to check for them.
+  if (isset($values['link_attributes'])) {
 
-    $parents = array_merge($array_parents, array('link_attributes', $attribute));
+    foreach ($values['link_attributes'] as $attribute => $value) {
+      $parents = array_merge($element['#array_parents'], array('link_attributes', $attribute));
 
-    // If the attributes have multiple values then we'll need to separate them.
-    if (isset($attributes_info[$attribute]['multiple_values']) &&
-      $attributes_info[$attribute]['multiple_values']) {
+      // If the attributes have multiple values then we'll need to separate them.
+      if (isset($attributes_info[$attribute]['multiple_values']) &&
+        $attributes_info[$attribute]['multiple_values']) {
 
-      if (is_string($value)) {
-        $value = array_filter(explode(' ', $value));
-      }
-    }
-
-    // Get the default value; which were setup by the site administrator.
-    $default_value = isset($attributes_default[$attribute]) ? $attributes_default[$attribute] : NULL;
-
-    // Alter the value if the attribute has been exposed.
-    if (isset($link_settings['link_attributes']['attributes'][$attribute]['exposed']) &&
-      $link_settings['link_attributes']['attributes'][$attribute]['exposed']) {
-
-      if (!empty($default_value)) {
-
-        if (is_array($value)) {
-          // Merge the user value and default value together.
-          $value = array_merge($value, $default_value);
-        }
-        elseif (empty($value)) {
-          // Set the default value as the value.
-          $value = $default_value;
+        if (is_string($value)) {
+          $value = array_filter(explode(' ', $value));
         }
       }
-    }
-    elseif (!empty($default_value)) {
-      $value = $default_value;
-    }
 
-    // Alter the attribute value if we are working with a "class".
-    if ($attribute == 'class') {
-      $value = is_array($value) ? array_map('drupal_html_class', $value) : drupal_html_class($value);
-    }
+      // Get the default value; which were setup by the site administrator.
+      $default_value = isset($attributes_default[$attribute]) ? $attributes_default[$attribute] : NULL;
 
-    // Set the attribute value in the form state.
-    drupal_array_set_nested_value($form_state['values'], $parents, $value);
+      // Alter the value if the attribute has been exposed.
+      if (isset($link_settings['link_attributes']['attributes'][$attribute]['exposed']) &&
+        $link_settings['link_attributes']['attributes'][$attribute]['exposed']) {
+
+        if (!empty($default_value)) {
+
+          if (is_array($value)) {
+            // Merge the user value and default value together.
+            $value = array_merge($value, $default_value);
+          }
+          elseif (empty($value)) {
+            // Set the default value as the value.
+            $value = $default_value;
+          }
+        }
+      }
+      elseif (!empty($default_value)) {
+        $value = $default_value;
+      }
+
+      // Alter the attribute value if we are working with a "class".
+      if ($attribute == 'class') {
+        $value = is_array($value) ? array_map('drupal_html_class', $value) : drupal_html_class($value);
+      }
+
+      // Set the attribute value in the form state.
+      drupal_array_set_nested_value($form_state['values'], $parents, $value);
+    }
   }
 }
 
@@ -682,21 +770,53 @@ function link_widget_process_element($element, &$form_state, $form) {
   $widget   = $instance['widget'];
   $settings = $widget['settings'];
 
-  $link_settings            = $settings['link_widget'];
+  $entity      = $form['#entity'];
+  $entity_type = $form['#entity_type'];
+
+  $link_settings    = $settings['link_widget'];
+  $link_url_options = $link_settings['link_url_options'];
+
   $link_attribute_settings  = $link_settings['link_attributes'];
   $link_settings_attributes = isset($link_attribute_settings['attributes']) ? $link_attribute_settings['attributes'] : array();
 
   $values = $element['#link_widget']['values'];
 
+  // Only apply the default text altercation for the link_text widget type.
+  if ($widget['type'] == 'link_text_widget') {
+    $default_text = isset($link_settings['default_text']) ? token_replace($link_settings['default_text'], array($entity_type => $entity)) : NULL;
+
+    if (isset($default_text)) {
+
+      // Only display the default text if the default value is empty.
+      if (empty($element['value']['#default_value'])) {
+        $element['value']['#default_value'] = $default_text;
+      }
+      $default_text_options = isset($link_settings['default_text_options']) ? $link_settings['default_text_options'] : array();
+
+      // If we have default text define then we'll have the hide type option
+      // available. No need to make sure it's set.
+      $element['value']['#access'] = !(bool) $default_text_options['hide_text'];
+    }
+  }
+
   // Attach the link url field to the element.
   $element['link_url'] = array(
     '#type' => 'textfield',
     '#title' => t('Link URL'),
-    '#description' => t('The URL that you would like the link to reference.'),
     '#default_value' => (isset($values['link_url']) && !empty($values['link_url'])) ? $values['link_url'] : $link_settings['link_url'],
     '#weight' => 100,
     '#required' => isset($element['#required']) ? $element['#required'] : FALSE,
   );
+
+  // Overwrite the link URL label if set within the field URL options.
+  if (!empty($link_url_options['label'])) {
+    $element['link_url']['#title'] = check_plain($link_url_options['label']);
+  }
+
+  // Only display the link URL description if set within the field URL options.
+  if (!empty($link_url_options['description'])) {
+    $element['link_url']['#description'] = filter_xss_admin($link_url_options['description']);
+  }
 
   // Attach the link attributes to the element.
   $element['link_attributes'] = array(
