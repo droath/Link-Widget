@@ -58,53 +58,60 @@ function link_widget_link_widget_attributes_info() {
  * Implements hook_field_widget_info().
  */
 function link_widget_field_widget_info() {
-  return array(
-    'link_image_widget' => array(
-      'label' => t('Link'),
-      'description' => t('A widget to capture link attributes for the image field.'),
-      'field types' => array('image'),
-      'settings' => array(
-        'link_widget' => array(
-          'link_url' => NULL,
-          'link_url_options' => array(
-            'url_fallback' => 'display_field_without_link',
-            'label' => NULL,
-            'description' => t('Input a URL that you would like the link to reference.'),
-          ),
-          'link_attributes' => array(),
-        ),
-        'progress_indicator' => 'throbber',
-        'preview_image_style' => 'thumbnail',
-      ),
-      'behaviors' => array(
-        'multiple values' => FIELD_BEHAVIOR_CUSTOM,
-        'default value' => FIELD_BEHAVIOR_NONE,
-      ),
+
+  // Define the base for the link widget settings.
+  $link_widget_base = array(
+    'link_url' => NULL,
+    'link_url_options' => array(
+      'url_fallback' => 'disregard_field_value',
+      'label' => NULL,
+      'description' => t('Input a URL that you would like the link to reference.'),
     ),
-    'link_text_widget' => array(
-      'label' => t('Link'),
-      'description' => t('A widget to capture link attributes for the text field.'),
-      'field types' => array('text'),
-      'settings' => array(
-        'link_widget' => array(
-          'default_text' => NULL,
-          'default_text_options' => array(),
-          'link_url' => NULL,
-          'link_url_options' => array(
-            'url_fallback' => 'disregard_field_value',
-            'label' => NULL,
-            'description' => t('Input a URL that you would like the link to reference.'),
-          ),
-          'link_attributes' => array(),
+    'link_url_validate' => TRUE,
+    'link_url_validate_options' => array(
+      'exclude_relative' => FALSE,
+      'regex' => '^(?:(?:(http|https):\/\/)|(?:www.))(\S+\.[\w]+)((?=\/)\S+)?$',
+    ),
+    'link_attributes' => array(),
+  );
+
+  // Define the field widgets configurations.
+  $info['link_image_widget'] = array(
+    'label' => t('Link'),
+    'description' => t('A widget to capture link attributes for the image field.'),
+    'field types' => array('image'),
+    'settings' => array(
+      'link_widget' => drupal_array_merge_deep($link_widget_base, array(
+        'link_url_options' => array(
+          'url_fallback' => 'display_field_without_link',
         ),
-        'size' => 60,
-      ),
-      'behaviors' => array(
-        'multiple values' => FIELD_BEHAVIOR_DEFAULT,
-        'default value' => FIELD_BEHAVIOR_NONE,
-      ),
+      )),
+      'progress_indicator' => 'throbber',
+      'preview_image_style' => 'thumbnail',
+    ),
+    'behaviors' => array(
+      'multiple values' => FIELD_BEHAVIOR_CUSTOM,
+      'default value' => FIELD_BEHAVIOR_NONE,
     ),
   );
+  $info['link_text_widget'] = array(
+    'label' => t('Link'),
+    'description' => t('A widget to capture link attributes for the text field.'),
+    'field types' => array('text'),
+    'settings' => array(
+      'link_widget' => drupal_array_merge_deep($link_widget_base, array(
+        'default_text' => NULL,
+        'default_text_options' => array(),
+      )),
+      'size' => 60,
+    ),
+    'behaviors' => array(
+      'multiple values' => FIELD_BEHAVIOR_DEFAULT,
+      'default value' => FIELD_BEHAVIOR_NONE,
+    ),
+  );
+
+  return $info;
 }
 
 /**
@@ -116,6 +123,21 @@ function link_widget_theme($existing, $type, $theme, $path) {
       'render element' => 'element',
     ),
   );
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function link_widget_form_field_ui_field_edit_form_alter(&$form, &$form_state) {
+  if (!isset($form['#instance'])) {
+    return;
+  }
+  $instance = $form['#instance'];
+
+  if (isset($instance['widget']['module']) &&
+    $instance['widget']['module'] == 'link_widget') {
+    $form['#validate'][] = 'link_widget_field_widget_settings_validate';
+  }
 }
 
 /**
@@ -168,6 +190,38 @@ function link_widget_field_widget_settings_form($field, $instance) {
     '#type' => 'textfield',
     '#title' => t('Default URL'),
     '#default_value' => isset($link_settings['link_url']) ? $link_settings['link_url'] : NULL,
+  );
+
+  // Define the link URL validation options.
+  $form['link_widget']['link_url_validate'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Validate URL'),
+    '#description' => t('Validate the URL on the entity edit form.'),
+    '#default_value' => isset($link_settings['link_url_validate']) ? $link_settings['link_url_validate'] : TRUE,
+  );
+  $form['link_widget']['link_url_validate_options'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Validate URL Options'),
+    '#states' => array(
+      'visible' => array(
+        ':input[name="instance[widget][settings][link_widget][link_url_validate]"]' => array('checked' => TRUE),
+      ),
+    ),
+  );
+  $link_url_validate_options = isset($link_settings['link_url_validate_options']) ? $link_settings['link_url_validate_options'] : array();
+
+  $form['link_widget']['link_url_validate_options']['exclude_relative'] = array(
+    '#type' => 'checkbox',
+    '#title' => t("Exclude Relative URL's"),
+    '#description' => t("If checked the relative URL's will be excluded from
+      validation."),
+    '#default_value' => isset($link_url_validate_options['exclude_relative']) ? $link_url_validate_options['exclude_relative'] : FALSE,
+  );
+  $form['link_widget']['link_url_validate_options']['regex'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Regular Expression'),
+    '#description' => t('Input the regular expression without the forward slashes.'),
+    '#default_value' => isset($link_url_validate_options['regex']) ? $link_url_validate_options['regex'] : NULL,
   );
 
   // Define the link URL options form elements.
@@ -551,6 +605,35 @@ function theme_link_widget_textfield($variables) {
 }
 
 /**
+ * Link widget validation callback for the field widget setting form.
+ */
+function link_widget_field_widget_settings_validate($form, &$form_state) {
+  $values  = $form_state['values'];
+  $parents = array('instance', 'widget', 'settings', 'link_widget');
+
+  $widget_settings = drupal_array_get_nested_value($values, $parents);
+  if (empty($widget_settings)) {
+    return;
+  }
+  $widget_elements = drupal_array_get_nested_value($form, $parents);
+
+  // Only continue if the link widget module is configured to validate the URL.
+  if ($widget_settings['link_url_validate']) {
+    $widget_url_validate_options = $widget_settings['link_url_validate_options'];
+
+    // Ensure that we have a regular expression in place for validating URL's.
+    if (!isset($widget_url_validate_options['regex']) ||
+      empty($widget_url_validate_options['regex'])) {
+
+      // Display a form error notifying that a regular expression is required.
+      $element = $widget_elements['link_url_validate_options']['regex'];
+      form_error($element, t('@element_title is required for validation to work properly.',
+        array('@element_title' => $element['#title'])));
+    }
+  }
+}
+
+/**
  * Link widget validation callback for the field UI display form.
  */
 function link_widget_ui_display_validate($form, $form_state) {
@@ -614,6 +697,62 @@ function link_widget_process_attribute_tokens($element, $attributes) {
 }
 
 /**
+ * Validate an absolute or relative URL's.
+ *
+ * @param $url
+ *   The URL that needs to be validated.
+ * @param $regex
+ *   A regular expression to validate URL's.
+ * @param $exclude_relative
+ *   A boolean indicating if relative URL's are excluded from validation.
+ * @param $relative_base
+ *   A string that represent the relative base path. If not set, the base url
+ *   will be used by default.
+ *
+ * @return bool
+ *   A boolean value indicating if the provide URL is valid or not.
+ */
+function link_widget_is_url_valid($url, $regex, $exclude_relative = FALSE, $relative_base = NULL) {
+  if (!isset($url) || !isset($regex)) {
+    return FALSE;
+  }
+  $parse_url = parse_url($url);
+
+  // Validate the URL differently based on if it's relevant or absolute. Don't
+  // include the "www." within the URL as it won't pass as a relative URL.
+  if (!$exclude_relative && (!isset($parse_url['schema'])
+    && strpos($url, 'www.') === FALSE && isset($parse_url['path']))) {
+
+    // Build the absolute URL based on the global base and relevant path.
+    if (!isset($relative_base)) {
+      $relative_base = $GLOBALS['base_url'];
+    }
+    $absolute_url = $relative_base . '/' . $parse_url['path'];
+
+    // Ensure the absolute URL follows the regular expression pattern.
+    if (!preg_match('/' . $regex . '/', $absolute_url)) {
+      return FALSE;
+    }
+
+    // Check if the absolute URL returns a valid HTTP request code.
+    $request = drupal_http_request($absolute_url);
+    if (is_object($request) && property_exists($request, 'code')) {
+
+      // Display an error if the returned request code is 404.
+      if ($request->code == 404) {
+        return FALSE;
+      }
+    }
+  }
+  // Validate the absolute URL against the provide regular expression.
+  elseif (!preg_match('/' . $regex . '/', $url)) {
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+/**
  * The link widget element validation callback.
  *
  * @param $element
@@ -662,6 +801,18 @@ function link_widget_validate_element($element, &$form_state, $form) {
   if ($field_is_empty) {
     return;
   }
+  $link_url_validate_options = isset($link_settings['link_url_validate_options']) ? $link_settings['link_url_validate_options'] : array();
+
+  // Display an form error if the provided URL is not valid.
+  $url = isset($values['link_url']) ? $values['link_url'] : NULL;
+  if ((isset($link_settings['link_url_validate']) && $link_settings['link_url_validate'])
+    && !link_widget_is_url_valid($url, $link_url_validate_options['regex'], $link_url_validate_options['exclude_relative'])) {
+
+    // Set form error for the given element only if it hasn't passed validation.
+    form_error($element['link_url'], t('@element_title field requires the URL to be valid.', array('@element_title' => $element['link_url']['#title'])));
+  }
+
+  // Determine what attributes are going to be added to the link element.
   $attributes_info    = link_widget_get_attributes_info();
   $attributes_default = link_widget_process_attribute_tokens($element, $link_settings['link_attributes']['attributes']);
 
@@ -671,7 +822,7 @@ function link_widget_validate_element($element, &$form_state, $form) {
     foreach ($values['link_attributes'] as $attribute => $value) {
       $parents = array_merge($element['#array_parents'], array('link_attributes', $attribute));
 
-      // If the attributes have multiple values then we'll need to separate them.
+      // If attributes have multiple values then we'll need to separate them.
       if (isset($attributes_info[$attribute]['multiple_values']) &&
         $attributes_info[$attribute]['multiple_values']) {
 
